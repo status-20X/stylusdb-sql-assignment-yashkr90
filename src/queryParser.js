@@ -1,66 +1,83 @@
+/*
+Creating a Query Parser which can parse SQL `SELECT` Queries only.
+*/
 function parseQuery(query) {
-  // First, let's trim the query to remove any leading/trailing whitespaces
-  query = query.trim();
+    // Trim the query to remove any leading/trailing whitespaces
+    query = query.trim();
 
-  // Split the query at the GROUP BY clause if it exists
-  const groupBySplit = query.split(/\sGROUP BY\s/i);
-  const queryWithoutGroupBy = groupBySplit[0]; // Everything before GROUP BY clause
+    // Updated regex to capture ORDER BY clause
+    const orderByRegex = /\sORDER BY\s(.+)/i;
+    const orderByMatch = query.match(orderByRegex);
 
-  // GROUP BY clause is the second part after splitting, if it exists
-  let groupByFields = groupBySplit.length > 1 ? groupBySplit[1].trim().split(',').map(field => field.trim()) : null;
+    let orderByFields = null;
+    if (orderByMatch) {
+        orderByFields = orderByMatch[1].split(',').map(field => {
+            const [fieldName, order] = field.trim().split(/\s+/);
+            return { fieldName, order: order ? order.toUpperCase() : 'ASC' };
+        });
+    }
 
-  // Split the query at the WHERE clause if it exists
-  const whereSplit = queryWithoutGroupBy.split(/\sWHERE\s/i);
-  const queryWithoutWhere = whereSplit[0]; // Everything before WHERE clause
+    // Remove ORDER BY clause from the query for further processing
+    query = query.replace(orderByRegex, '');
 
-  // WHERE clause is the second part after splitting, if it exists
-  const whereClause = whereSplit.length > 1 ? whereSplit[1].trim() : null;
+    // Split the query at the GROUP BY clause if it exists
+    const groupByRegex = /\sGROUP BY\s(.+)/i;
+    const groupByMatch = query.match(groupByRegex);
 
-  // Split the remaining query at the JOIN clause if it exists
-  const joinSplit = queryWithoutWhere.split(/\s(INNER|LEFT|RIGHT) JOIN\s/i);
-  const selectPart = joinSplit[0].trim(); // Everything before JOIN clause
+    let groupByFields = null;
+    if (groupByMatch) {
+        groupByFields = groupByMatch[1].split(',').map(field => field.trim());
+    }
 
-  // Parse the SELECT part
-  const selectRegex = /^SELECT\s(.+?)\sFROM\s(.+)/i;
-  const selectMatch = selectPart.match(selectRegex);
-  if (!selectMatch) {
-    throw new Error("Invalid SELECT format");
-  }
+    // Remove GROUP BY clause from the query for further processing
+    query = query.replace(groupByRegex, '');
 
-  const [, fields, table] = selectMatch;
+    // Split the query at the WHERE clause if it exists
+    const whereSplit = query.split(/\sWHERE\s/i);
+    const queryWithoutWhere = whereSplit[0]; // Everything before WHERE clause
 
-  const { joinType, joinTable, joinCondition } = parseJoinClause(queryWithoutWhere);
+    // WHERE clause is the second part after splitting, if it exists
+    const whereClause = whereSplit.length > 1 ? whereSplit[1].trim() : null;
 
-  // Parse the JOIN part if it exists
+    // Split the remaining query at the JOIN clause if it exists
+    const joinSplit = queryWithoutWhere.split(/\s(INNER|LEFT|RIGHT) JOIN\s/i);
+    const selectPart = joinSplit[0].trim(); // Everything before JOIN clause
 
-  // Parse the WHERE part if it exists
-  let whereClauses = [];
-  if (whereClause) {
-    whereClauses = parseWhereClause(whereClause);
-  }
+    // Parse the SELECT part
+    const selectRegex = /^SELECT\s(.+?)\sFROM\s(.+)/i;
+    const selectMatch = selectPart.match(selectRegex);
+    if (!selectMatch) {
+        throw new Error('Invalid SELECT format');
+    }
 
-  //   const groupByRegex = /\sGROUP BY\s(.+)/i;
-  //   const groupByMatch = query.match(groupByRegex);
+    const [, fields, table] = selectMatch;
 
-  const aggregateFunctionRegex = /(\bCOUNT\b|\bAVG\b|\bSUM\b|\bMIN\b|\bMAX\b)\s*\(\s*(\*|\w+)\s*\)/i;
-  const hasAggregateWithoutGroupBy = aggregateFunctionRegex.test(query) && !groupByFields;
-  // // Parse the WHERE part if it exists
-  // let joinClause = [];
-  // if (joinClause) {
-  //     joinClause = parseJoinClause(joinClause);
-  // }
+    // Extract JOIN information
+    const { joinType, joinTable, joinCondition } = parseJoinClause(queryWithoutWhere);
 
-  return {
-    fields: fields.split(",").map((field) => field.trim()),
-    table: table.trim(),
-    whereClauses,
-    joinType,
-    joinTable,
-    joinCondition,
-    groupByFields,
-    hasAggregateWithoutGroupBy,
-  };
+    // Parse the WHERE part if it exists
+    let whereClauses = [];
+    if (whereClause) {
+        whereClauses = parseWhereClause(whereClause);
+    }
+
+    // Check for the presence of aggregate functions without GROUP BY
+    const aggregateFunctionRegex = /(\bCOUNT\b|\bAVG\b|\bSUM\b|\bMIN\b|\bMAX\b)\s*\(\s*(\*|\w+)\s*\)/i;
+    const hasAggregateWithoutGroupBy = aggregateFunctionRegex.test(query) && !groupByFields;
+
+    return {
+        fields: fields.split(',').map(field => field.trim()),
+        table: table.trim(),
+        whereClauses,
+        joinType,
+        joinTable,
+        joinCondition,
+        groupByFields,
+        orderByFields,
+        hasAggregateWithoutGroupBy
+    };
 }
+
 
 function parseWhereClause(whereString) {
     const conditionRegex = /(.*?)(=|!=|>|<|>=|<=)(.*)/;
